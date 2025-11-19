@@ -6,7 +6,6 @@ Outputs results to CSV format.
 
 import json
 import torch
-import torch.nn.functional as F
 import argparse
 import time
 import re
@@ -116,8 +115,15 @@ class ModelEvaluator:
         self.model.eval()
         print(f"Model loaded successfully with dtype: {dtype}")
     
-    def generate_text(self, prompt: str, max_length: Optional[int] = None) -> str:
-        """Generate text using the loaded model with deterministic decoding."""
+    def generate_text(self, prompt: str, max_length: Optional[int] = None, temperature: Optional[float] = None) -> str:
+        """Generate text using the loaded model.
+        
+        Args:
+            prompt: Input prompt text
+            max_length: Maximum number of tokens to generate
+            temperature: Sampling temperature. If None, uses deterministic decoding (greedy).
+                        If provided, uses sampling with the given temperature.
+        """
         if max_length is None:
             max_length = self.max_output_tokens
             
@@ -126,47 +132,26 @@ class ModelEvaluator:
         inputs = {key: value.to(self.model.device) for key, value in inputs.items()}
 
         with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                max_new_tokens=max_length,
-                do_sample=False,
-                pad_token_id=self.tokenizer.eos_token_id
-            )
+            if temperature is None:
+                # Deterministic decoding (greedy) - default behavior
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_length,
+                    do_sample=False,
+                    pad_token_id=self.tokenizer.eos_token_id
+                )
+            else:
+                # Sampling with temperature (non-deterministic but potentially more accurate)
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_length,
+                    do_sample=True,
+                    temperature=temperature,
+                    pad_token_id=self.tokenizer.eos_token_id
+                )
 
         generated_output = outputs[0][input_length:]
         return self.tokenizer.decode(generated_output, skip_special_tokens=True)
-    
-    def score_safe_unsafe(self, prompt: str, candidates: Tuple[str, str] = ("safe", "unsafe")) -> Dict[str, Any]:
-        """Compute probabilities for safe vs unsafe tokens directly from logits."""
-        enc = self.tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
-        enc = {k: v.to(self.model.device) for k, v in enc.items()}
-        
-        with torch.no_grad():
-            logits = self.model(**enc).logits
-        
-        pad_id = self.tokenizer.pad_token_id
-        last_idx = (enc["input_ids"] != pad_id).sum(dim=1) - 1
-        last_logits = logits[0, last_idx[0], :]
-        probs = F.softmax(last_logits, dim=-1)
-        
-        # Get token IDs for candidates
-        cand_ids = {}
-        for c in candidates:
-            encoded = self.tokenizer.encode(c, add_special_tokens=False)
-            if encoded:
-                cand_ids[c] = encoded[0]
-        
-        cand_probs = {c: float(probs[cid]) for c, cid in cand_ids.items() if cid < len(probs)}
-        
-        if cand_probs:
-            total = sum(cand_probs.values())
-            if total > 0:
-                cand_probs = {k: v / total for k, v in cand_probs.items()}
-            cand_probs["pred"] = max(cand_probs, key=cand_probs.get)
-        else:
-            cand_probs["pred"] = None
-        
-        return cand_probs
 
 
 class EvaluationMetrics:
