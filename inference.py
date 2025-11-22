@@ -115,14 +115,14 @@ class ModelEvaluator:
         self.model.eval()
         print(f"Model loaded successfully with dtype: {dtype}")
     
-    def generate_text(self, prompt: str, max_length: Optional[int] = None, temperature: Optional[float] = None) -> str:
+    def generate_text(self, prompt: str, max_length: Optional[int] = None, temperature: float = 0.2) -> str:
         """Generate text using the loaded model.
         
         Args:
             prompt: Input prompt text
             max_length: Maximum number of tokens to generate
-            temperature: Sampling temperature. If None, uses deterministic decoding (greedy).
-                        If provided, uses sampling with the given temperature.
+            temperature: Sampling temperature. Default is 0.2 for better accuracy.
+                        Set to 0.0 for deterministic (greedy) decoding.
         """
         if max_length is None:
             max_length = self.max_output_tokens
@@ -132,8 +132,8 @@ class ModelEvaluator:
         inputs = {key: value.to(self.model.device) for key, value in inputs.items()}
 
         with torch.no_grad():
-            if temperature is None:
-                # Deterministic decoding (greedy) - default behavior
+            if temperature == 0.0:
+                # Deterministic decoding (greedy)
                 outputs = self.model.generate(
                     **inputs,
                     max_new_tokens=max_length,
@@ -141,7 +141,7 @@ class ModelEvaluator:
                     pad_token_id=self.tokenizer.eos_token_id
                 )
             else:
-                # Sampling with temperature (non-deterministic but potentially more accurate)
+                # Sampling with temperature (default: 0.2 for better accuracy)
                 outputs = self.model.generate(
                     **inputs,
                     max_new_tokens=max_length,
